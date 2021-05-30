@@ -30,3 +30,25 @@
 *.exe
 *.out
 *.app
+
+Visual Studio
+
+*.user
+*.filters
+
+Vulkan Example/.vs/
+
+Vulkan Example/[Dd]ebug/
+Vulkan Example/[Dd]ebugPublic/
+Vulkan Example/[Rr]elease/
+Vulkan Example/[Rr]eleases/
+Vulkan Example/x64/
+Vulkan Example/x86/
+Vulkan Example/[Ww][Ii][Nn]32/
+Vulkan Example/[Aa][Rr][Mm]/
+Vulkan Example/[Aa][Rr][Mm]64/
+Vulkan Example/bld/
+Vulkan Example/[Bb]in/
+Vulkan Example/[Oo]bj/
+Vulkan Example/[Ll]og/
+Vulkan Example/[Ll]ogs/
