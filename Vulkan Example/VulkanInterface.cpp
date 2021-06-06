@@ -1,8 +1,11 @@
-#include "App.hpp"
+#include "VulkanInterface.hpp"
+#include "QueueFamilyIndices.hpp"
 #include <stdexcept>
 #include <vector>
 #include <iostream>
 #include <cstring>
+#include <optional>
+#include <set>
 
 namespace vulkanExample
 {
@@ -10,7 +13,7 @@ namespace vulkanExample
 
 
 
-#pragma region DEBUG_SETTING
+#pragma region DEBUG_SETTING_CALLS
 #ifdef NDEBUG
 	const bool enableValidationLayers = false;
 #else
@@ -24,6 +27,10 @@ namespace vulkanExample
 		VkDebugUtilsMessageTypeFlagsEXT messageType,
 		const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
 		void* pUserData) {
+
+		//reduce verbosity
+		if (messageSeverity == VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT)
+			return VK_FALSE;
 
 		// print the error/warning/information message to std::cerr
 		std::cerr << "validation layer: " << pCallbackData->pMessage << std::endl;
@@ -55,21 +62,7 @@ namespace vulkanExample
 		}
 	}
 
-	// Search for extensions in both glfw and Vulkan
-	std::vector<const char*> VulkanInterface::getRequiredExtensions() {
-		uint32_t glfwExtensionCount = 0;
-		const char** glfwExtensions;
-		// Get glfw extensions
-		glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
-		// create vector with extension info
-		std::vector<const char*> extensions(glfwExtensions, glfwExtensions + glfwExtensionCount);
-		//if debugging, add DEBUG extension
-		if (enableValidationLayers) {
-			extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
-		}
-
-		return extensions;
-	}
+	
 
 	void VulkanInterface::setupDebugMessenger() {
 		if (!enableValidationLayers) return;
@@ -108,6 +101,7 @@ namespace vulkanExample
 		initWindow(w_width, w_height);
 		// Initialize VulkanAPI
 		initVulkan();
+		
 	}
 
 	VulkanInterface::~VulkanInterface()
@@ -117,10 +111,13 @@ namespace vulkanExample
 
 	void VulkanInterface::cleanup()
 	{
+		vkDestroyDevice(logicalDevice, nullptr);
 		//destroy debug validation layer
+		vkDestroySurfaceKHR(instance, surface, nullptr);
+		
 		if (enableValidationLayers)
 			DestroyDebugUtilsMessengerEXT(instance, debugMessenger, nullptr);
-
+		
 		//destroys Vulkan instance
 		vkDestroyInstance(instance, nullptr);
 		// Destroy window
@@ -144,7 +141,37 @@ namespace vulkanExample
 
 #pragma region INSTANCE_INIT
 
+	// Search for extensions in both glfw and Vulkan
+	std::vector<const char*> VulkanInterface::getRequiredExtensions() {
+		uint32_t glfwExtensionCount = 0;
+		const char** glfwExtensions;
+		// Get glfw extensions
+		glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
+		// create vector with extension info
+		std::vector<const char*> extensions(glfwExtensions, glfwExtensions + glfwExtensionCount);
+		//if debugging, add DEBUG extension
+		if (enableValidationLayers) {
+			extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+		}
 
+		return extensions;
+	}
+
+	// initialize Vulkan API and Debug Handler
+	void VulkanInterface::initVulkan()
+	{
+		//Create Instance
+		createInstance();
+		//setup debugging
+		setupDebugMessenger();
+		//create surface
+		createSurface();
+		//Pick Physical devices
+		pickPhysicalDevices();
+		//Logical Device
+		createLogicalDevice();
+	}
+	
 	void VulkanInterface::initWindow(const uint32_t width, const uint32_t height)
 	{
 		//initialize glfw
@@ -159,12 +186,7 @@ namespace vulkanExample
 		window = glfwCreateWindow(width, height, "Vulkan Example", nullptr, nullptr);
 	}
 
-	// initialize Vulkan API and Debug Handler
-	void VulkanInterface::initVulkan()
-	{
-		createInstance();
-		setupDebugMessenger();
-	}
+	
 
 	void VulkanInterface::createInstance()
 	{
@@ -223,6 +245,13 @@ namespace vulkanExample
 	}
 
 	
+	void VulkanInterface::createSurface()
+	{
+		if (glfwCreateWindowSurface(instance, window, nullptr, &surface) != VK_SUCCESS)
+			throw std::runtime_error("failed to create rendering surface");
+
+	}
+
 
 
 	bool VulkanInterface::checkValidationLayerSupport() {
@@ -249,6 +278,165 @@ namespace vulkanExample
 
 		return true;
 	}
+	
+
+
+
+	void VulkanInterface::pickPhysicalDevices()
+	{
+		
+		uint32_t deviceCount = 0;
+		// Checks device count first
+		vkEnumeratePhysicalDevices(instance, &deviceCount, nullptr);
+
+		if (deviceCount == 0)
+			throw std::runtime_error("Failed to find device with Vulkan support");
+
+		std::vector<VkPhysicalDevice> deviceList(deviceCount);
+		vkEnumeratePhysicalDevices(instance, &deviceCount, deviceList.data());
+
+		for (VkPhysicalDevice &device : deviceList)
+		{
+			std::optional<QueueFamilyIndices> result = checkDevice(device);
+			if (result.has_value())
+			{
+				physicalDevice = device;
+				queueFamilies = result.value();
+				vkGetPhysicalDeviceProperties(device, &deviceProperties);
+				vkGetPhysicalDeviceFeatures(device, &deviceFeatures);
+				break;
+			}
+		}
+
+		if (physicalDevice == VK_NULL_HANDLE)
+			throw std::runtime_error("Failed to find a suitable GPU");
+	}
+
+	std::optional<QueueFamilyIndices> VulkanInterface::checkDevice(VkPhysicalDevice device)
+	{
+		VkPhysicalDeviceProperties properties;
+		VkPhysicalDeviceFeatures features;
+		// Get device properties from device handle
+		vkGetPhysicalDeviceProperties(device, &properties);
+		vkGetPhysicalDeviceFeatures(device, &features);
+
+		if ((properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU || properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU) && features.geometryShader)
+		{
+
+			QueueFamilyIndices indices = findQueueFamilies(device);
+			
+#ifndef NDEBUG
+			std::cout << "Found suitable device" << std::endl;
+			if (properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)
+				std::cout << "Device Type:" << "VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU" << std::endl;
+			else
+				std::cout << "Device Type:" << "VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU" << std::endl;
+			std::cout << "Device Name:" << properties.deviceName << std::endl;
+			std::cout << "Vendor ID:" << properties.vendorID << std::endl;
+			std::cout << "API Version:" << properties.apiVersion << std::endl;
+			std::cout << "Driver Version:" << properties.driverVersion << std::endl;
+			std::cout << "Has queue supporting VK_QUEUE_GRAPHICS_BIT: " << (indices.graphicsFamily.has_value() ? "true" : "false") << std::endl;
+#endif
+
+			if (indices.isValid())
+				return indices;
+		}
+
+		return std::nullopt;
+	}
+
+
+	QueueFamilyIndices VulkanInterface::findQueueFamilies(VkPhysicalDevice device)
+	{
+		QueueFamilyIndices indices;
+
+		uint32_t queueFamilyCount = 0;
+		vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, nullptr);
+
+		std::vector<VkQueueFamilyProperties> queueFamiliesProperties(queueFamilyCount);
+		vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, queueFamiliesProperties.data());
+
+		//Need to find at least one queue that supports VK_QUEUE_GRAPHICS_BIT
+		int i = 0;
+		for (const auto& queueFamily : queueFamiliesProperties) {
+			if (queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT) {
+				indices.graphicsFamily = i;
+				VkBool32 presentSupport = false;
+				vkGetPhysicalDeviceSurfaceSupportKHR(device, i, surface, &presentSupport);
+				if (presentSupport)
+					indices.presentFamily = i;
+			}
+
+			i++;
+		}
+
+
+		return indices;
+	}
+
+
+	void VulkanInterface::createLogicalDevice()
+	{
+		//Create queue structure first
+		
+		//This check should never be true at this point, but who knows right? It catches a programmer mistake
+		//PS: It happened once
+		if (!queueFamilies.graphicsFamily.has_value() || !queueFamilies.presentFamily.has_value())
+			throw std::runtime_error("Queue has not been initialized or found");
+		
+		std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
+		std::set<uint32_t> uniqueQueueFamilies = { queueFamilies.graphicsFamily.value(), queueFamilies.presentFamily.value() };
+
+
+		for (uint32_t queueFamily : uniqueQueueFamilies) {
+			VkDeviceQueueCreateInfo queueCreateInfo{};
+			//add structure type
+			queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+			// add indec
+			queueCreateInfo.queueFamilyIndex = queueFamily;
+			queueCreateInfo.queueCount = 1;
+			//set fixed prio
+			queueCreateInfo.pQueuePriorities = new const float{ 1.0f };
+			queueCreateInfos.push_back(queueCreateInfo);
+		}
+
+
+		//Now create logical device
+		VkDeviceCreateInfo deviceCreateInfo{};
+		deviceCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+		//Add queues and count
+		deviceCreateInfo.pQueueCreateInfos = queueCreateInfos.data();
+		deviceCreateInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
+		//Add physical device features
+		deviceCreateInfo.pEnabledFeatures = &deviceFeatures;
+
+		//Add validation layers. This is for retro-compatibility with older versions of Vulkan
+		deviceCreateInfo.enabledExtensionCount = 0;
+
+		if (enableValidationLayers) {
+			deviceCreateInfo.enabledLayerCount = static_cast<uint32_t>(validationLayers.size());
+			deviceCreateInfo.ppEnabledLayerNames = validationLayers.data();
+		}
+		else {
+			deviceCreateInfo.enabledLayerCount = 0;
+		}
+
+		//create device
+		if (vkCreateDevice(physicalDevice, &deviceCreateInfo, nullptr, &logicalDevice) != VK_SUCCESS)
+			throw std::runtime_error("Failed to create logical device");
+
+		//create graphics queue
+		vkGetDeviceQueue(logicalDevice, queueFamilies.graphicsFamily.value(), 0, &graphicsQueue);
+		if (graphicsQueue == nullptr)
+			throw std::runtime_error("Failed to allocate graphics queue");
+
+		//creates present queue
+		vkGetDeviceQueue(logicalDevice, queueFamilies.presentFamily.value(), 0, &presentQueue);
+		if (presentQueue == nullptr)
+			throw std::runtime_error("Failed to allocate present queue");
+
+	}
+
 
 #pragma endregion
 
