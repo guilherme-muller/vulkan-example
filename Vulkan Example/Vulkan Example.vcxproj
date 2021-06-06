@@ -97,6 +97,20 @@
       <AdditionalLibraryDirectories>C:\VulkanSDK\1.2.176.1\Lib;C:\Users\guilh\source\libs\glfw-3.3.4.bin.WIN64\lib-vc2019;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalDependencies>vulkan-1.lib;glfw3.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
+    <CustomBuildStep>
+      <Command>
+      </Command>
+    </CustomBuildStep>
+    <PreBuildEvent>
+      <Command>cd $(MSBuildProjectDirectory)\shaders
+rm *.spv
+python3.8.exe compile_shaders.py
+mkdir "$(OutputPath)shaders\"
+copy *.spv "$(OutputPath)shaders\"</Command>
+    </PreBuildEvent>
+    <PreBuildEvent>
+      <Message>Building Shaders</Message>
+    </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
@@ -117,6 +131,20 @@
       <AdditionalLibraryDirectories>C:\VulkanSDK\1.2.176.1\Lib;C:\Users\guilh\source\libs\glfw-3.3.4.bin.WIN64\lib-vc2019;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalDependencies>vulkan-1.lib;glfw3.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
+    <CustomBuildStep>
+      <Command>
+      </Command>
+    </CustomBuildStep>
+    <PreBuildEvent>
+      <Command>cd $(MSBuildProjectDirectory)\shaders
+rm *.spv
+python3.8.exe compile_shaders.py
+mkdir "$(OutputPath)shaders\"
+copy *.spv "$(OutputPath)shaders\"</Command>
+    </PreBuildEvent>
+    <PreBuildEvent>
+      <Message>Building Shaders</Message>
+    </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
@@ -133,6 +161,20 @@
       <AdditionalLibraryDirectories>C:\VulkanSDK\1.2.176.1\Lib;C:\Users\guilh\source\libs\glfw-3.3.4.bin.WIN64\lib-vc2019;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalDependencies>vulkan-1.lib;glfw3.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
+    <CustomBuildStep>
+      <Command>
+      </Command>
+    </CustomBuildStep>
+    <PreBuildEvent>
+      <Command>cd $(MSBuildProjectDirectory)\shaders
+rm *.spv
+python3.8.exe compile_shaders.py
+mkdir "$(OutputPath)shaders\"
+copy *.spv "$(OutputPath)shaders\"</Command>
+    </PreBuildEvent>
+    <PreBuildEvent>
+      <Message>Building Shaders</Message>
+    </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
@@ -153,6 +195,20 @@
       <AdditionalLibraryDirectories>C:\VulkanSDK\1.2.176.1\Lib;C:\Users\guilh\source\libs\glfw-3.3.4.bin.WIN64\lib-vc2019;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalDependencies>vulkan-1.lib;glfw3.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
+    <CustomBuildStep>
+      <Command>
+      </Command>
+    </CustomBuildStep>
+    <PreBuildEvent>
+      <Command>cd $(MSBuildProjectDirectory)\shaders
+rm *.spv
+python3.8.exe compile_shaders.py
+mkdir "$(OutputPath)shaders\"
+copy *.spv "$(OutputPath)shaders\"</Command>
+    </PreBuildEvent>
+    <PreBuildEvent>
+      <Message>Building Shaders</Message>
+    </PreBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="VulkanInterface.cpp" />
@@ -160,7 +216,19 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="QueueFamilyIndices.hpp" />
+    <ClInclude Include="SwapChainSupportDetails.hpp" />
     <ClInclude Include="VulkanInterface.hpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="shaders\compile_shaders.py" />
+    <None Include="shaders\frag.spv">
+      <DeploymentContent>true</DeploymentContent>
+    </None>
+    <None Include="shaders\shader.frag" />
+    <None Include="shaders\shader.vert" />
+    <None Include="shaders\vert.spv">
+      <DeploymentContent>true</DeploymentContent>
+    </None>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

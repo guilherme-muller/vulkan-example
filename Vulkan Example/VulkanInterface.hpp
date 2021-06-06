@@ -2,8 +2,9 @@
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 #include "QueueFamilyIndices.hpp"
-#include "VulkanInterface.hpp"
+#include "SwapChainSupportDetails.hpp"
 #include <vector>
+#include <string>
 namespace vulkanExample
 {
 	class VulkanInterface
@@ -20,18 +21,32 @@ namespace vulkanExample
 
 	private:
 		std::vector<const char*> validationLayers;
+		const std::vector<const char*> deviceExtensions = {
+			VK_KHR_SWAPCHAIN_EXTENSION_NAME
+		};
+
+		std::vector<VkImage> swapChainImages;
+		std::vector<VkImageView> swapChainImageViews;
+		std::vector<VkFramebuffer> swapChainFramebuffers;
 
 		GLFWwindow* window;
 		VkInstance instance = VK_NULL_HANDLE;
 		VkSurfaceKHR surface;
+		VkSwapchainKHR swapChain;
+		VkFormat swapChainImageFormat;
+		VkExtent2D swapChainExtent;
 		VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
-		VkPhysicalDeviceProperties deviceProperties;
-		VkPhysicalDeviceFeatures deviceFeatures;
-		QueueFamilyIndices queueFamilies;
 		VkQueue graphicsQueue;
 		VkQueue presentQueue;
 		VkDevice logicalDevice = VK_NULL_HANDLE;
 		VkDebugUtilsMessengerEXT debugMessenger;
+		VkRenderPass renderPass;
+		VkPipelineLayout pipelineLayout;
+		VkPipeline graphicsPipeline;
+
+		VkPhysicalDeviceProperties deviceProperties;
+		VkPhysicalDeviceFeatures deviceFeatures;
+		QueueFamilyIndices queueFamilies;
 
 		uint32_t w_width;
 		uint32_t w_height;
@@ -46,9 +61,23 @@ namespace vulkanExample
 		void setupDebugMessenger();
 		void populateDebugMessengerCreateInfo(VkDebugUtilsMessengerCreateInfoEXT& createInfo);
 		void pickPhysicalDevices();
+		void createLogicalDevice();
+		void createSwapChain();
+		void createImageViews();
+		void createRenderPass();
+		void createGraphicsPipeline();
+		void createFrameBuffers();
+		bool checkDeviceExtensionSupport(VkPhysicalDevice device);
+		void printDeviceExtensionSupport(VkPhysicalDevice device);
+		VkShaderModule createShaderModule(const std::vector<char>& code);
 		std::optional<QueueFamilyIndices> checkDevice(VkPhysicalDevice device);
 		QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device);
-		void createLogicalDevice();
+		SwapChainSupportDetails querySwapChainSupport(VkPhysicalDevice device);
+		VkSurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats);
+		VkPresentModeKHR chooseSwapPresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes);
+		VkExtent2D chooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilities);
+
+		static std::vector<char> readFile(const std::string& filename);
 	};
 
 } //namespace
