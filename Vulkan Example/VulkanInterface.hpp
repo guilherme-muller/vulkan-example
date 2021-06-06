@@ -28,6 +28,7 @@ namespace vulkanExample
 		std::vector<VkImage> swapChainImages;
 		std::vector<VkImageView> swapChainImageViews;
 		std::vector<VkFramebuffer> swapChainFramebuffers;
+		std::vector<VkCommandBuffer> commandBuffers;
 
 		GLFWwindow* window;
 		VkInstance instance = VK_NULL_HANDLE;
@@ -43,6 +44,10 @@ namespace vulkanExample
 		VkRenderPass renderPass;
 		VkPipelineLayout pipelineLayout;
 		VkPipeline graphicsPipeline;
+		VkCommandPool commandPool;
+
+		VkSemaphore imageAvailableSemaphore;
+		VkSemaphore renderFinishedSemaphore;
 
 		VkPhysicalDeviceProperties deviceProperties;
 		VkPhysicalDeviceFeatures deviceFeatures;
@@ -67,6 +72,10 @@ namespace vulkanExample
 		void createRenderPass();
 		void createGraphicsPipeline();
 		void createFrameBuffers();
+		void createCommandPool();
+		void createCommandBuffers();
+		void createSemaphores();
+		void drawFrame();
 		bool checkDeviceExtensionSupport(VkPhysicalDevice device);
 		void printDeviceExtensionSupport(VkPhysicalDevice device);
 		VkShaderModule createShaderModule(const std::vector<char>& code);

@@ -114,6 +114,13 @@ namespace vulkanExample
 
 	void VulkanInterface::cleanup()
 	{
+		//destroy semaphores
+		vkDestroySemaphore(logicalDevice, renderFinishedSemaphore, nullptr);
+		vkDestroySemaphore(logicalDevice, imageAvailableSemaphore, nullptr);
+
+		//destroy command poll
+		vkDestroyCommandPool(logicalDevice, commandPool, nullptr);
+
 		//destroy framebuffers
 		for (auto framebuffer : swapChainFramebuffers) {
 			vkDestroyFramebuffer(logicalDevice, framebuffer, nullptr);
@@ -151,6 +158,7 @@ namespace vulkanExample
 		while (!glfwWindowShouldClose(window))
 		{
 			glfwPollEvents();
+			drawFrame();
 		}
 	}
 
@@ -196,6 +204,12 @@ namespace vulkanExample
 		createGraphicsPipeline();
 		//creates frame buffer
 		createFrameBuffers();
+		//creates command poll
+		createCommandPool();
+		//creates command buffers
+		createCommandBuffers();
+		//create semaphores
+		createSemaphores();
 	}
 	
 	void VulkanInterface::initWindow(const uint32_t width, const uint32_t height)
@@ -458,6 +472,19 @@ namespace vulkanExample
 		renderPassInfo.subpassCount = 1;
 		renderPassInfo.pSubpasses = &subpass;
 
+		//creates a subpass
+		VkSubpassDependency dependency{};
+		dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+		dependency.dstSubpass = 0;
+		dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+		dependency.srcAccessMask = 0;
+		dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+		dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+		
+		renderPassInfo.dependencyCount = 1;
+		renderPassInfo.pDependencies = &dependency;
+
+
 		//creates render pass
 		if (vkCreateRenderPass(logicalDevice, &renderPassInfo, nullptr, &renderPass) != VK_SUCCESS) {
 			throw std::runtime_error("failed to create render pass!");
@@ -668,6 +695,152 @@ namespace vulkanExample
 				throw std::runtime_error("failed to create framebuffer!");
 			}
 		}
+	}
+
+	void VulkanInterface::createCommandPool()
+	{
+		VkCommandPoolCreateInfo poolInfo{};
+		poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+		//since we will be recording commands for drawing, we have to use the graphics queue
+		poolInfo.queueFamilyIndex = queueFamilies.graphicsFamily.value();
+		poolInfo.flags = 0; // Optional
+
+
+		if (vkCreateCommandPool(logicalDevice, &poolInfo, nullptr, &commandPool) != VK_SUCCESS) {
+			throw std::runtime_error("failed to create command pool!");
+		}
+
+	}
+
+	void VulkanInterface::createCommandBuffers()
+	{
+		//resizes the vector
+		commandBuffers.resize(swapChainFramebuffers.size());
+
+		VkCommandBufferAllocateInfo allocInfo{};
+		allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+		allocInfo.commandPool = commandPool;
+		//can be submitted to a queue for execution, but can't be called by other command buffers
+		//it can be useful to reuse common operations from primary buffer, but not doing it now
+		allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+		allocInfo.commandBufferCount = (uint32_t)commandBuffers.size();
+
+		if (vkAllocateCommandBuffers(logicalDevice, &allocInfo, commandBuffers.data()) != VK_SUCCESS) {
+			throw std::runtime_error("failed to allocate command buffers!");
+		}
+		
+		for (size_t i = 0; i < commandBuffers.size(); i++) {
+			//configures command buffer
+			VkCommandBufferBeginInfo beginInfo{};
+			beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+			//no flags applicable
+			beginInfo.flags = 0; // Optional
+			//only relevant for secondary buffers
+			beginInfo.pInheritanceInfo = nullptr; // Optional
+
+
+			//begins recording command buffer
+			//all functions that start now with vkCmd are recorded to the buffer
+			if (vkBeginCommandBuffer(commandBuffers[i], &beginInfo) != VK_SUCCESS) {
+				throw std::runtime_error("failed to begin recording command buffer!");
+			}
+
+			//configures render pass
+			VkRenderPassBeginInfo renderPassInfo{};
+			renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+			renderPassInfo.renderPass = renderPass;
+			renderPassInfo.framebuffer = swapChainFramebuffers[i];
+			//define render area
+			renderPassInfo.renderArea.offset = { 0, 0 };
+			renderPassInfo.renderArea.extent = swapChainExtent;
+			
+			//this is the Clear color define in the color attachment. Cofigured now to be black with 100% opacity
+			VkClearValue clearColor = { 0.0f, 0.0f, 0.0f, 1.0f };
+			renderPassInfo.clearValueCount = 1;
+			renderPassInfo.pClearValues = &clearColor;
+
+			//render pass is recorded as first step
+			vkCmdBeginRenderPass(commandBuffers[i], &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+			//Bind graphics pipeline
+			vkCmdBindPipeline(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
+			//Draws
+			//second parameter: Vertex Count
+			//Third parameter: instance count for instanced rendering, use 1 for now
+			// Forth and fifth parameters: offset to gl_VertexIndex and gl_InstanceIndex
+			vkCmdDraw(commandBuffers[i], 3, 1, 0, 0);
+
+			//end render pass
+			vkCmdEndRenderPass(commandBuffers[i]);
+
+			//end recording
+			if (vkEndCommandBuffer(commandBuffers[i]) != VK_SUCCESS) {
+				throw std::runtime_error("failed to record command buffer!");
+			}
+		}
+
+	}
+
+	void VulkanInterface::createSemaphores()
+	{
+		VkSemaphoreCreateInfo semaphoreInfo{};
+		semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+		//create semaphores
+		if (vkCreateSemaphore(logicalDevice, &semaphoreInfo, nullptr, &imageAvailableSemaphore) != VK_SUCCESS ||
+			vkCreateSemaphore(logicalDevice, &semaphoreInfo, nullptr, &renderFinishedSemaphore) != VK_SUCCESS) {
+
+			throw std::runtime_error("failed to create semaphores!");
+		}
+	}
+	
+	void VulkanInterface::drawFrame()
+	{
+		//acquires image, infinite timeout for now
+		uint32_t imageIndex;
+		vkAcquireNextImageKHR(logicalDevice, swapChain, UINT64_MAX, imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
+
+		//prepares command buffer submission (Queue submission and synchronization done by semaphore)
+		VkSubmitInfo submitInfo{};
+		submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+		
+		//wait for this semaphore (in other words, wait for vkAcquireNextImage... to finish)
+		VkSemaphore waitSemaphores[] = { imageAvailableSemaphore };
+		VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
+		
+		submitInfo.waitSemaphoreCount = 1;
+		submitInfo.pWaitSemaphores = waitSemaphores;
+		submitInfo.pWaitDstStageMask = waitStages;
+		submitInfo.commandBufferCount = 1;
+		submitInfo.pCommandBuffers = &commandBuffers[imageIndex];
+
+		//Semaphore that will be used by renderer
+		VkSemaphore signalSemaphores[] = { renderFinishedSemaphore };
+		submitInfo.signalSemaphoreCount = 1;
+		submitInfo.pSignalSemaphores = signalSemaphores;
+
+		//submits command buffer to graphics queue
+		if (vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE) != VK_SUCCESS) {
+			throw std::runtime_error("failed to submit draw command buffer!");
+		}
+
+		//Presentation part
+		VkPresentInfoKHR presentInfo{};
+		presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+
+		//wait for render signal
+		presentInfo.waitSemaphoreCount = 1;
+		presentInfo.pWaitSemaphores = signalSemaphores;
+
+		VkSwapchainKHR swapChains[] = { swapChain };
+		presentInfo.swapchainCount = 1;
+		//swap chain and image index
+		presentInfo.pSwapchains = swapChains;
+		presentInfo.pImageIndices = &imageIndex;
+
+		presentInfo.pResults = nullptr; // Optional
+
+		//presents rendering on screen
+		vkQueuePresentKHR(presentQueue, &presentInfo);
+
 	}
 
 	VkShaderModule VulkanInterface::createShaderModule(const std::vector<char>& code)
