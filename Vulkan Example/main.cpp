@@ -11,12 +11,16 @@ using namespace vulkanExample;
 const uint32_t WIDTH = 800;
 const uint32_t HEIGHT = 600;
 
-int main() {
-    App app;
+
+
+
+
+int WinMain() {
+    VulkanInterface app(WIDTH, HEIGHT);
     try
     {
         //runs app with defined size
-        app.run(WIDTH, HEIGHT);
+        app.run();
     }
     catch (const std::exception& e)
     {
@@ -25,3 +29,6 @@ int main() {
     }
     return EXIT_SUCCESS;
 }
+
+
+int main() { return WinMain(); } //To allow switching between Windows and Console (debug)
