@@ -113,8 +113,29 @@ namespace vulkanExample
 		cleanup();
 	}
 
+	void VulkanInterface::cleanupSwapChain()
+	{
+		for (size_t i = 0; i < swapChainFramebuffers.size(); i++) {
+			vkDestroyFramebuffer(logicalDevice, swapChainFramebuffers[i], nullptr);
+		}
+
+		vkFreeCommandBuffers(logicalDevice, commandPool, static_cast<uint32_t>(commandBuffers.size()), commandBuffers.data());
+
+		vkDestroyPipeline(logicalDevice, graphicsPipeline, nullptr);
+		vkDestroyPipelineLayout(logicalDevice, pipelineLayout, nullptr);
+		vkDestroyRenderPass(logicalDevice, renderPass, nullptr);
+
+		for (size_t i = 0; i < swapChainImageViews.size(); i++) {
+			vkDestroyImageView(logicalDevice, swapChainImageViews[i], nullptr);
+		}
+
+		vkDestroySwapchainKHR(logicalDevice, swapChain, nullptr);
+	}
+
 	void VulkanInterface::cleanup()
 	{
+		cleanupSwapChain();
+
 		for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
 		{
 			//destroy semaphores
@@ -126,19 +147,8 @@ namespace vulkanExample
 		//destroy command poll
 		vkDestroyCommandPool(logicalDevice, commandPool, nullptr);
 
-	
-		//destroy framebuffers
-		for (auto framebuffer : swapChainFramebuffers) {
-			vkDestroyFramebuffer(logicalDevice, framebuffer, nullptr);
-		}
-		vkDestroyPipeline(logicalDevice, graphicsPipeline, nullptr);
-		vkDestroyPipelineLayout(logicalDevice, pipelineLayout, nullptr);
-		vkDestroyRenderPass(logicalDevice, renderPass, nullptr);
-		for (auto imageView : swapChainImageViews) {
-			vkDestroyImageView(logicalDevice, imageView, nullptr);
-		}
-		//destroys swap chain and device
-		vkDestroySwapchainKHR(logicalDevice, swapChain, nullptr);
+		
+		
 		vkDestroyDevice(logicalDevice, nullptr);
 
 		//destroy debug validation layer
@@ -220,21 +230,33 @@ namespace vulkanExample
 		createSyncObjects();
 	}
 	
+
+	//static functon do deal with window resize
+	void VulkanInterface::framebufferResizeCallback(GLFWwindow* window, int width, int height)
+	{
+		auto instance = reinterpret_cast<VulkanInterface*>(glfwGetWindowUserPointer(window));
+		if (instance != nullptr)
+			instance->frameBufferResized = true;
+	}
+
 	void VulkanInterface::initWindow(const uint32_t width, const uint32_t height)
 	{
 		//initialize glfw
 		glfwInit();
 		//request to not create an OpenGL context
 		glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-		//can't resize
-		glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+		//can resize
+		glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
 		// create window. 
 		// First null pointer refers to monitor where window should be created
 		// Second null pointer is only relevant to OpenGL
 		window = glfwCreateWindow(width, height, "Vulkan Example", nullptr, nullptr);
+		glfwSetWindowUserPointer(window, this);
+		glfwSetWindowSizeCallback(window, framebufferResizeCallback);
 	}
 
 	
+
 
 	void VulkanInterface::createInstance()
 	{
@@ -297,6 +319,29 @@ namespace vulkanExample
 	{
 		if (glfwCreateWindowSurface(instance, window, nullptr, &surface) != VK_SUCCESS)
 			throw std::runtime_error("failed to create rendering surface");
+
+	}
+
+
+	
+
+	void VulkanInterface::recreateSwapChain()
+	{
+		int width = 0, height = 0;
+		glfwGetFramebufferSize(window, &width, &height);
+		while (width == 0 || height == 0) {
+			glfwGetFramebufferSize(window, &width, &height);
+			glfwWaitEvents();
+		}
+
+		vkDeviceWaitIdle(logicalDevice);
+		cleanupSwapChain();
+		createSwapChain();
+		createImageViews();
+		createRenderPass();
+		createGraphicsPipeline();
+		createFrameBuffers();
+		createCommandBuffers();
 
 	}
 
@@ -742,7 +787,7 @@ namespace vulkanExample
 			VkCommandBufferBeginInfo beginInfo{};
 			beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 			//no flags applicable
-			beginInfo.flags = 0; // Optional
+			beginInfo.flags = 0; //optional
 			//only relevant for secondary buffers
 			beginInfo.pInheritanceInfo = nullptr; // Optional
 
@@ -824,7 +869,17 @@ namespace vulkanExample
 		
 		//acquires image, infinite timeout for now
 		uint32_t imageIndex;
-		vkAcquireNextImageKHR(logicalDevice, swapChain, UINT64_MAX, imageAvailableSemaphores[currentFrame], VK_NULL_HANDLE, &imageIndex);
+		VkResult result = vkAcquireNextImageKHR(logicalDevice, swapChain, UINT64_MAX, imageAvailableSemaphores[currentFrame], VK_NULL_HANDLE, &imageIndex);
+
+		if (result == VK_ERROR_OUT_OF_DATE_KHR)
+		{
+			recreateSwapChain();
+			return;
+		}
+		else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR)
+		{
+			throw std::runtime_error("failed to acquire swap chain image");
+		}
 
 
 		// Check if a previous frame is using this image (i.e. there is its fence to wait on)
@@ -879,7 +934,17 @@ namespace vulkanExample
 		presentInfo.pResults = nullptr; // Optional
 
 		//presents rendering on screen
-		vkQueuePresentKHR(presentQueue, &presentInfo);
+		result = vkQueuePresentKHR(presentQueue, &presentInfo);
+		
+		if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || frameBufferResized)
+		{
+			frameBufferResized = false;
+			recreateSwapChain();
+		}
+		else if (result != VK_SUCCESS)
+		{
+			throw std::runtime_error("failed to acquire swap chain image");
+		}
 
 		//increments current frame
 		currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;

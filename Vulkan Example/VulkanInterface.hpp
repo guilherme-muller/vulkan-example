@@ -17,12 +17,15 @@ namespace vulkanExample
 		VulkanInterface(const uint32_t width, const uint32_t height);
 		~VulkanInterface();
 		void run();
-
+		
 
 	private:
 
 		const int MAX_FRAMES_IN_FLIGHT = 2;
 		size_t currentFrame = 0;
+		bool frameBufferResized = false;
+		
+
 		std::vector<VkSemaphore> imageAvailableSemaphores;
 		std::vector<VkSemaphore> renderFinishedSemaphores;
 		std::vector<VkFence> inFlightFences;
@@ -61,7 +64,9 @@ namespace vulkanExample
 		uint32_t w_width;
 		uint32_t w_height;
 
+
 		void initWindow(const uint32_t width, const uint32_t height);
+		static void framebufferResizeCallback(GLFWwindow* window, int width, int height);
 		void initVulkan();
 		void createSurface();
 		bool checkValidationLayerSupport();
@@ -73,6 +78,8 @@ namespace vulkanExample
 		void pickPhysicalDevices();
 		void createLogicalDevice();
 		void createSwapChain();
+		void recreateSwapChain();
+		void cleanupSwapChain();
 		void createImageViews();
 		void createRenderPass();
 		void createGraphicsPipeline();
