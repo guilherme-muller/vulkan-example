@@ -20,6 +20,14 @@ namespace vulkanExample
 
 
 	private:
+
+		const int MAX_FRAMES_IN_FLIGHT = 2;
+		size_t currentFrame = 0;
+		std::vector<VkSemaphore> imageAvailableSemaphores;
+		std::vector<VkSemaphore> renderFinishedSemaphores;
+		std::vector<VkFence> inFlightFences;
+		std::vector<VkFence> imagesInFlight;
+
 		std::vector<const char*> validationLayers;
 		const std::vector<const char*> deviceExtensions = {
 			VK_KHR_SWAPCHAIN_EXTENSION_NAME
@@ -46,9 +54,6 @@ namespace vulkanExample
 		VkPipeline graphicsPipeline;
 		VkCommandPool commandPool;
 
-		VkSemaphore imageAvailableSemaphore;
-		VkSemaphore renderFinishedSemaphore;
-
 		VkPhysicalDeviceProperties deviceProperties;
 		VkPhysicalDeviceFeatures deviceFeatures;
 		QueueFamilyIndices queueFamilies;
@@ -74,7 +79,7 @@ namespace vulkanExample
 		void createFrameBuffers();
 		void createCommandPool();
 		void createCommandBuffers();
-		void createSemaphores();
+		void createSyncObjects();
 		void drawFrame();
 		bool checkDeviceExtensionSupport(VkPhysicalDevice device);
 		void printDeviceExtensionSupport(VkPhysicalDevice device);
