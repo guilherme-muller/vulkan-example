@@ -217,6 +217,7 @@ copy *.spv "$(OutputPath)shaders\"</Command>
   <ItemGroup>
     <ClInclude Include="QueueFamilyIndices.hpp" />
     <ClInclude Include="SwapChainSupportDetails.hpp" />
+    <ClInclude Include="Vertex.hpp" />
     <ClInclude Include="VulkanInterface.hpp" />
   </ItemGroup>
   <ItemGroup>

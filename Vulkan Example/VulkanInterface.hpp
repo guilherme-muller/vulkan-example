@@ -3,12 +3,15 @@
 #include <GLFW/glfw3.h>
 #include "QueueFamilyIndices.hpp"
 #include "SwapChainSupportDetails.hpp"
+#include "Vertex.hpp"
 #include <vector>
 #include <string>
 namespace vulkanExample
 {
 	class VulkanInterface
 	{
+
+
 	public:
 		std::vector<const char*> getRequiredExtensions();
 		static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity, VkDebugUtilsMessageTypeFlagsEXT messageType, const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData, void* pUserData);
@@ -20,6 +23,15 @@ namespace vulkanExample
 		
 
 	private:
+
+		std::vector<Vertex> vertices = {
+		{{0.0f, -0.5f}, {1.0f, 0.0f, 0.0f}},
+		{{0.5f, 0.5f}, {0.0f, 1.0f, 0.0f}},
+		{{-0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}}
+		};
+
+		uint64_t frameCounter = 0;
+		
 
 		const int MAX_FRAMES_IN_FLIGHT = 2;
 		size_t currentFrame = 0;
@@ -56,6 +68,8 @@ namespace vulkanExample
 		VkPipelineLayout pipelineLayout;
 		VkPipeline graphicsPipeline;
 		VkCommandPool commandPool;
+		VkBuffer vertexBuffer;
+		VkDeviceMemory vertexBufferMemory;
 
 		VkPhysicalDeviceProperties deviceProperties;
 		VkPhysicalDeviceFeatures deviceFeatures;
@@ -75,6 +89,7 @@ namespace vulkanExample
 		void createInstance();
 		void setupDebugMessenger();
 		void populateDebugMessengerCreateInfo(VkDebugUtilsMessengerCreateInfoEXT& createInfo);
+		void updateVertexDataToMemory();
 		void pickPhysicalDevices();
 		void createLogicalDevice();
 		void createSwapChain();
@@ -86,8 +101,13 @@ namespace vulkanExample
 		void createFrameBuffers();
 		void createCommandPool();
 		void createCommandBuffers();
+		void createVertextBuffer();
+		void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& memory);
+		void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size);
 		void createSyncObjects();
 		void drawFrame();
+		
+		uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties);
 		bool checkDeviceExtensionSupport(VkPhysicalDevice device);
 		void printDeviceExtensionSupport(VkPhysicalDevice device);
 		VkShaderModule createShaderModule(const std::vector<char>& code);

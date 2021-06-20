@@ -1,5 +1,6 @@
 #include "VulkanInterface.hpp"
 #include "QueueFamilyIndices.hpp"
+#include "glm/glm.hpp"
 #include <stdexcept>
 #include <vector>
 #include <iostream>
@@ -136,6 +137,10 @@ namespace vulkanExample
 	{
 		cleanupSwapChain();
 
+		vkDestroyBuffer(logicalDevice, vertexBuffer, nullptr);
+		vkFreeMemory(logicalDevice, vertexBufferMemory, nullptr);
+
+
 		for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
 		{
 			//destroy semaphores
@@ -224,6 +229,8 @@ namespace vulkanExample
 		createFrameBuffers();
 		//creates command poll
 		createCommandPool();
+		//Creates Vertex Buffer
+		createVertextBuffer();
 		//creates command buffers
 		createCommandBuffers();
 		//create semaphores
@@ -579,6 +586,15 @@ namespace vulkanExample
 		vertexInputInfo.vertexAttributeDescriptionCount = 0;
 		vertexInputInfo.pVertexAttributeDescriptions = nullptr; // Optional
 
+		//Get binding information from Vertex structure
+		auto bindingDescription = Vertex::getBindingDescription();
+		auto attributeDescriptions = Vertex::getAttributeDescriptions();
+
+		vertexInputInfo.vertexBindingDescriptionCount = 1;
+		vertexInputInfo.vertexAttributeDescriptionCount = static_cast<uint32_t>(attributeDescriptions.size());
+		vertexInputInfo.pVertexBindingDescriptions = &bindingDescription;
+		vertexInputInfo.pVertexAttributeDescriptions = attributeDescriptions.data();
+
 		//primitives will be drawn as normal triangles for now
 		VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
 		inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
@@ -816,11 +832,17 @@ namespace vulkanExample
 			vkCmdBeginRenderPass(commandBuffers[i], &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 			//Bind graphics pipeline
 			vkCmdBindPipeline(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
+			
+			//Binds vertex buffer with command buffer
+			VkBuffer vertexBuffers[] = { vertexBuffer };
+			VkDeviceSize offsets[] = { 0 };
+			vkCmdBindVertexBuffers(commandBuffers[i], 0, 1, vertexBuffers, offsets);
+			
 			//Draws
 			//second parameter: Vertex Count
 			//Third parameter: instance count for instanced rendering, use 1 for now
 			// Forth and fifth parameters: offset to gl_VertexIndex and gl_InstanceIndex
-			vkCmdDraw(commandBuffers[i], 3, 1, 0, 0);
+			vkCmdDraw(commandBuffers[i], static_cast<uint32_t>(vertices.size()), 1, 0, 0);
 
 			//end render pass
 			vkCmdEndRenderPass(commandBuffers[i]);
@@ -832,6 +854,126 @@ namespace vulkanExample
 		}
 
 	}
+
+
+	void VulkanInterface::createBuffer
+	(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory)
+	{
+		VkBufferCreateInfo bufferInfo{};
+		bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+		bufferInfo.size = size;
+		bufferInfo.usage = usage;
+		bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+		if (vkCreateBuffer(logicalDevice, &bufferInfo, nullptr, &buffer) != VK_SUCCESS)
+		{
+			throw std::runtime_error("failed to create vertex buffer");
+		}
+
+
+		//Get memory requirements
+		VkMemoryRequirements memRequirements;
+		vkGetBufferMemoryRequirements(logicalDevice, buffer, &memRequirements);
+
+		// allocate memory for the buffer
+		VkMemoryAllocateInfo allocInfo{};
+		allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+		allocInfo.allocationSize = memRequirements.size;
+		//We must be able to map the memory so we can write on it
+		allocInfo.memoryTypeIndex =
+			findMemoryType(memRequirements.memoryTypeBits, properties);
+
+		if (vkAllocateMemory(logicalDevice, &allocInfo, nullptr, &bufferMemory) != VK_SUCCESS) {
+			throw std::runtime_error("failed to allocate vertex buffer memory!");
+		}
+
+		vkBindBufferMemory(logicalDevice, buffer, bufferMemory, 0);
+	}
+
+
+	void VulkanInterface::createVertextBuffer()
+	{
+
+		VkDeviceSize size = sizeof(vertices[0]) * vertices.size();
+		//creates a temporary buffer to add vertex data to (CPU accessible memory)
+		VkBuffer stagingBuffer;
+		VkDeviceMemory stagingBufferMemory;
+		createBuffer(size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+			stagingBuffer, stagingBufferMemory);
+		
+		//copy memory to temporary buffer
+		void* data;
+		vkMapMemory(logicalDevice, stagingBufferMemory, 0, size, 0, &data);
+		memcpy(data, vertices.data(), (size_t)size);
+		vkUnmapMemory(logicalDevice, stagingBufferMemory);
+		// Create Vertex Buffer
+		VkMemoryPropertyFlags flags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+		createBuffer(size, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, flags, vertexBuffer, vertexBufferMemory);
+
+		//copy vertex data to vertex buffer (from CPU to GPU)
+		copyBuffer(stagingBuffer, vertexBuffer, size);
+		// destroy temporary buffer
+		vkDestroyBuffer(logicalDevice, stagingBuffer, nullptr);
+		vkFreeMemory(logicalDevice, stagingBufferMemory, nullptr);
+	}
+
+	void VulkanInterface::copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size)
+	{
+		//buffer copy has to be performed by command buffers, as the memory might not be accessible by the CPU
+		VkCommandBufferAllocateInfo info{};
+		info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+		info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+		info.commandPool = commandPool;
+		info.commandBufferCount = 1;
+		//creates command buffer
+		VkCommandBuffer commBuffer;
+		vkAllocateCommandBuffers(logicalDevice, &info, &commBuffer);
+
+		VkCommandBufferBeginInfo beginInfo{};
+		beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+		beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+		//begin recording command buffer
+		vkBeginCommandBuffer(commBuffer, &beginInfo);
+		// data region for Copy Buffer command
+		VkBufferCopy copyRegion{};
+		copyRegion.srcOffset = 0;
+		copyRegion.dstOffset = 0;
+		copyRegion.size = size;
+		// Copy buffers
+		vkCmdCopyBuffer(commBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
+		//end recording
+		vkEndCommandBuffer(commBuffer);
+
+		VkSubmitInfo submitInfo{};
+		submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+		submitInfo.commandBufferCount = 1;
+		submitInfo.pCommandBuffers = &commBuffer;
+		
+		//submits command to queue
+		vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
+		// wait until queue is idle. This could be done using fences in case several memory operations are being performed at the same time
+		vkQueueWaitIdle(graphicsQueue);
+
+		vkFreeCommandBuffers(logicalDevice, commandPool, 1, &commBuffer);
+
+	}
+
+	uint32_t VulkanInterface::findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties)
+	{
+		VkPhysicalDeviceMemoryProperties memProperties;
+		vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memProperties);
+
+		for (uint32_t i = 0; i < memProperties.memoryTypeCount; i++) {
+			if ((typeFilter & (1 << i)) && (memProperties.memoryTypes[i].propertyFlags & properties) == properties) 
+			{
+				return i;
+			}
+		}
+
+		throw std::runtime_error("failed to find suitable memory type!");
+
+	}
+
 
 	void VulkanInterface::createSyncObjects()
 	{
@@ -861,11 +1003,27 @@ namespace vulkanExample
 	
 	void VulkanInterface::drawFrame()
 	{
+#ifdef COLOR_PLAYGROUND
+		//does some coloring using cpu... Maybe I can move this to the GPU one day
+		frameCounter++;
+
+		vertices[0].color.r = 1.0- sin(frameCounter * 3.1415 / 180);
+		vertices[0].color.g = sin(frameCounter * 3.1415 / 180);
+		vertices[0].color.b = 1.0;
+
+		vertices[1].color.r = sin(frameCounter * 3.1415 / 180);
+		vertices[1].color.g = 1.0;
+		vertices[1].color.b = 1.0 - sin(frameCounter * 3.1415 / 180);
+
+		vertices[2].color.r = 1.0;
+		vertices[2].color.g = 1.0 - sin(frameCounter * 3.1415 / 180);
+		vertices[2].color.b = sin(frameCounter * 3.1415 / 180);
+		
+		//updates the vertex colors
+		//updateVertexDataToMemory();
+#endif
 
 		vkWaitForFences(logicalDevice, 1, &inFlightFences[currentFrame], VK_TRUE, UINT64_MAX);
-		
-
-		
 		
 		//acquires image, infinite timeout for now
 		uint32_t imageIndex;
@@ -1202,6 +1360,11 @@ namespace vulkanExample
 		//Need to find at least one queue that supports VK_QUEUE_GRAPHICS_BIT
 		int i = 0;
 		for (const auto& queueFamily : queueFamiliesProperties) {
+			// Looking for a queue which has transfer capabilities, but it is not a graphic queue.
+			// Unfortunately, my setup doesn't have one
+			if ((queueFamily.queueFlags & VK_QUEUE_TRANSFER_BIT) && !(queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT))
+				std::cout << "Found queue " << i << " with transfer bit AND not Graphics bit" << std::endl;
+			
 			if (queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT) {
 				indices.graphicsFamily = i;
 				VkBool32 presentSupport = false;
