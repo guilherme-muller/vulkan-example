@@ -25,9 +25,14 @@ namespace vulkanExample
 	private:
 
 		std::vector<Vertex> vertices = {
-		{{0.0f, -0.5f}, {1.0f, 0.0f, 0.0f}},
-		{{0.5f, 0.5f}, {0.0f, 1.0f, 0.0f}},
-		{{-0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}}
+		{{-0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}},
+		{{0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}},
+		{{0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}},
+		{{-0.5f, 0.5f}, {1.0f, 1.0f, 1.0f}}
+		};
+
+		std::vector<uint16_t> indices = {
+			0,1,2,2,3,0
 		};
 
 		uint64_t frameCounter = 0;
@@ -53,6 +58,9 @@ namespace vulkanExample
 		std::vector<VkFramebuffer> swapChainFramebuffers;
 		std::vector<VkCommandBuffer> commandBuffers;
 
+		std::vector<VkBuffer> uniformBuffers;
+		std::vector<VkDeviceMemory> uniformBuffersMemory;
+
 		GLFWwindow* window;
 		VkInstance instance = VK_NULL_HANDLE;
 		VkSurfaceKHR surface;
@@ -66,11 +74,15 @@ namespace vulkanExample
 		VkDebugUtilsMessengerEXT debugMessenger;
 		VkRenderPass renderPass;
 		VkPipelineLayout pipelineLayout;
+		VkDescriptorSetLayout descriptorSetLayout;
 		VkPipeline graphicsPipeline;
 		VkCommandPool commandPool;
+		VkDescriptorPool descriptorPool;
+		std::vector<VkDescriptorSet> descriptorSets;
 		VkBuffer vertexBuffer;
 		VkDeviceMemory vertexBufferMemory;
-
+		VkBuffer indexBuffer;
+		VkDeviceMemory indexBufferMemory;
 		VkPhysicalDeviceProperties deviceProperties;
 		VkPhysicalDeviceFeatures deviceFeatures;
 		QueueFamilyIndices queueFamilies;
@@ -97,14 +109,20 @@ namespace vulkanExample
 		void cleanupSwapChain();
 		void createImageViews();
 		void createRenderPass();
+		void createDescriptorSetLayout();
 		void createGraphicsPipeline();
 		void createFrameBuffers();
 		void createCommandPool();
 		void createCommandBuffers();
 		void createVertextBuffer();
+		void createIndexBuffer();
+		void createUniformBuffers();
+		void createDescriptorPool();
+		void createDescriptorSets();
 		void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& memory);
 		void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size);
 		void createSyncObjects();
+		void updateUniformBuffer(uint32_t currentImage);
 		void drawFrame();
 		
 		uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties);

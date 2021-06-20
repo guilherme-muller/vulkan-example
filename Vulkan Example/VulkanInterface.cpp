@@ -1,6 +1,9 @@
+#define GLM_FORCE_RADIANS
 #include "VulkanInterface.hpp"
 #include "QueueFamilyIndices.hpp"
 #include "glm/glm.hpp"
+#include "glm/gtc/matrix_transform.hpp"
+#include "UniformBufferObject.hpp"
 #include <stdexcept>
 #include <vector>
 #include <iostream>
@@ -10,6 +13,8 @@
 #include <cstdint> 
 #include <algorithm> 
 #include <fstream>
+#include <chrono>
+
 
 namespace vulkanExample
 {
@@ -131,11 +136,25 @@ namespace vulkanExample
 		}
 
 		vkDestroySwapchainKHR(logicalDevice, swapChain, nullptr);
+
+		for (size_t i = 0; i < swapChainImages.size(); i++) {
+			vkDestroyBuffer(logicalDevice, uniformBuffers[i], nullptr);
+			vkFreeMemory(logicalDevice, uniformBuffersMemory[i], nullptr);
+		}
+
+		vkDestroyDescriptorPool(logicalDevice, descriptorPool, nullptr);
+
 	}
 
 	void VulkanInterface::cleanup()
 	{
 		cleanupSwapChain();
+
+		vkDestroyDescriptorSetLayout(logicalDevice, descriptorSetLayout, nullptr);
+
+		vkDestroyBuffer(logicalDevice, indexBuffer, nullptr);
+		vkFreeMemory(logicalDevice, indexBufferMemory, nullptr);
+
 
 		vkDestroyBuffer(logicalDevice, vertexBuffer, nullptr);
 		vkFreeMemory(logicalDevice, vertexBufferMemory, nullptr);
@@ -223,6 +242,8 @@ namespace vulkanExample
 		createImageViews();
 		//create render pass
 		createRenderPass();
+		//create descriptor layout
+		createDescriptorSetLayout();
 		//create graphics pipeline
 		createGraphicsPipeline();
 		//creates frame buffer
@@ -231,6 +252,14 @@ namespace vulkanExample
 		createCommandPool();
 		//Creates Vertex Buffer
 		createVertextBuffer();
+		//creates Index Buffer
+		createIndexBuffer();
+		//creates uniform buffers
+		createUniformBuffers();
+		//creates descriptor poll
+		createDescriptorPool();
+		//create descriptor sets
+		createDescriptorSets();
 		//creates command buffers
 		createCommandBuffers();
 		//create semaphores
@@ -348,6 +377,9 @@ namespace vulkanExample
 		createRenderPass();
 		createGraphicsPipeline();
 		createFrameBuffers();
+		createUniformBuffers();
+		createDescriptorPool();
+		createDescriptorSets();
 		createCommandBuffers();
 
 	}
@@ -552,6 +584,28 @@ namespace vulkanExample
 
 	}
 
+	void VulkanInterface::createDescriptorSetLayout()
+	{
+		VkDescriptorSetLayoutBinding uboLayoutBinding{};
+		uboLayoutBinding.binding = 0;
+		uboLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+		uboLayoutBinding.descriptorCount = 1;
+		//specifies which shader the descriptor will be referenced
+		uboLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+		uboLayoutBinding.pImmutableSamplers = nullptr;
+
+		VkDescriptorSetLayoutCreateInfo createInfo{};
+		createInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+		createInfo.bindingCount = 1;
+		createInfo.pBindings = &uboLayoutBinding;
+
+		if (vkCreateDescriptorSetLayout(logicalDevice, &createInfo, nullptr, &descriptorSetLayout) != VK_SUCCESS)
+		{
+			throw std::runtime_error("failed to create descriptor set layout");
+		}
+
+	}
+
 	void VulkanInterface::createGraphicsPipeline()
 	{
 		auto vertShaderCode = readFile("shaders/vert.spv");
@@ -640,7 +694,7 @@ namespace vulkanExample
 		rasterizer.lineWidth = 1.0f;
 		//this is better explained here: https://learnopengl.com/Advanced-OpenGL/Face-culling
 		rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
-		rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;
+		rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
 		//not using this, could be used for shadow mapping
 		rasterizer.depthBiasEnable = VK_FALSE;
 		rasterizer.depthBiasConstantFactor = 0.0f; // Optional
@@ -696,8 +750,8 @@ namespace vulkanExample
 		//They are commonly used to pass the transformation matrix to the vertex shader, or to create texture samplers in the fragment shader
 		VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
 		pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-		pipelineLayoutInfo.setLayoutCount = 0; // Optional
-		pipelineLayoutInfo.pSetLayouts = nullptr; // Optional
+		pipelineLayoutInfo.setLayoutCount = 1; // 1 descriptor set layout
+		pipelineLayoutInfo.pSetLayouts = &descriptorSetLayout; //Descriptor set layout
 		pipelineLayoutInfo.pushConstantRangeCount = 0; // Optional
 		pipelineLayoutInfo.pPushConstantRanges = nullptr; // Optional
 		
@@ -838,11 +892,13 @@ namespace vulkanExample
 			VkDeviceSize offsets[] = { 0 };
 			vkCmdBindVertexBuffers(commandBuffers[i], 0, 1, vertexBuffers, offsets);
 			
-			//Draws
-			//second parameter: Vertex Count
-			//Third parameter: instance count for instanced rendering, use 1 for now
-			// Forth and fifth parameters: offset to gl_VertexIndex and gl_InstanceIndex
-			vkCmdDraw(commandBuffers[i], static_cast<uint32_t>(vertices.size()), 1, 0, 0);
+			vkCmdBindIndexBuffer(commandBuffers[i], indexBuffer, 0, VK_INDEX_TYPE_UINT16);
+
+			vkCmdBindDescriptorSets(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[i], 0, nullptr);
+
+
+			//Draws indexed, now that we have index buffers
+			vkCmdDrawIndexed(commandBuffers[i], static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
 
 			//end render pass
 			vkCmdEndRenderPass(commandBuffers[i]);
@@ -864,7 +920,7 @@ namespace vulkanExample
 		bufferInfo.size = size;
 		bufferInfo.usage = usage;
 		bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
+		
 		if (vkCreateBuffer(logicalDevice, &bufferInfo, nullptr, &buffer) != VK_SUCCESS)
 		{
 			throw std::runtime_error("failed to create vertex buffer");
@@ -890,6 +946,112 @@ namespace vulkanExample
 		vkBindBufferMemory(logicalDevice, buffer, bufferMemory, 0);
 	}
 
+
+	void VulkanInterface::createDescriptorPool()
+	{
+		VkDescriptorPoolSize poolSize{};
+		poolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+		poolSize.descriptorCount = static_cast<uint32_t>(swapChainImages.size());
+
+		VkDescriptorPoolCreateInfo createInfo{};
+		createInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+		createInfo.poolSizeCount = 1;
+		createInfo.pPoolSizes = &poolSize;
+		//maximum device sets
+		createInfo.maxSets = static_cast<uint32_t>(swapChainImages.size());
+
+		if (vkCreateDescriptorPool(logicalDevice, &createInfo, nullptr, &descriptorPool) != VK_SUCCESS)
+		{
+			throw std::runtime_error("Failed to create descriptor pool");
+		}
+
+
+	}
+
+	void VulkanInterface::createDescriptorSets()
+	{
+		//creates descriptor set layouts
+		std::vector<VkDescriptorSetLayout> layouts(swapChainImages.size(), descriptorSetLayout);
+
+		VkDescriptorSetAllocateInfo allocInfo{};
+		allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+		allocInfo.descriptorPool = descriptorPool;
+		allocInfo.descriptorSetCount = static_cast<uint32_t>(swapChainImages.size());
+		allocInfo.pSetLayouts = layouts.data();
+
+		descriptorSets.resize(swapChainImages.size());
+		//Allocate descriptor sets
+		if (vkAllocateDescriptorSets(logicalDevice, &allocInfo, descriptorSets.data()) != VK_SUCCESS) {
+			throw std::runtime_error("failed to allocate descriptor sets!");
+		}
+		
+		for (size_t i = 0; i < swapChainImages.size(); i++) {
+			// Buffer info, as the descriptor refers to a buffer
+			VkDescriptorBufferInfo bufferInfo{};
+			bufferInfo.buffer = uniformBuffers[i];
+			bufferInfo.offset = 0;
+			bufferInfo.range = sizeof(UniformBufferObject);
+
+			VkWriteDescriptorSet descriptorWrite{};
+			descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+			descriptorWrite.dstSet = descriptorSets[i];
+			//same binding as the vertex
+			descriptorWrite.dstBinding = 0;
+			// If it was an array, we could specify the index here
+			descriptorWrite.dstArrayElement = 0;
+
+			descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+			//specify how many array elements we want to update (in case it was an array)
+			descriptorWrite.descriptorCount = 1;
+
+			descriptorWrite.pBufferInfo = &bufferInfo;
+			descriptorWrite.pImageInfo = nullptr; // Optional
+			descriptorWrite.pTexelBufferView = nullptr; // Optional
+
+			vkUpdateDescriptorSets(logicalDevice, 1, &descriptorWrite, 0, nullptr);
+		}
+	}
+
+
+	void VulkanInterface::createUniformBuffers()
+	{
+		VkDeviceSize size = sizeof(UniformBufferObject);
+		uniformBuffers.resize(swapChainImages.size());
+		uniformBuffersMemory.resize(swapChainImages.size());
+
+		VkBufferUsageFlags usageFlags = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+		VkMemoryPropertyFlags memFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+
+		for (int i = 0; i < swapChainImages.size(); i++)
+		{
+			createBuffer(size, usageFlags, memFlags, uniformBuffers[i], uniformBuffersMemory[i]);
+		}
+	}
+
+	void VulkanInterface::createIndexBuffer()
+	{
+		VkDeviceSize size = sizeof(indices[0]) * indices.size();
+		VkBuffer stagingBuffer;
+		VkDeviceMemory stagingBufferMemory;
+		createBuffer(size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+			stagingBuffer, stagingBufferMemory);
+
+		//copy memory to temporary buffer
+		void* data;
+		vkMapMemory(logicalDevice, stagingBufferMemory, 0, size, 0, &data);
+		memcpy(data, indices.data(), (size_t)size);
+		vkUnmapMemory(logicalDevice, stagingBufferMemory);
+
+		VkMemoryPropertyFlags flags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+		createBuffer(size, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, flags, indexBuffer, indexBufferMemory);
+
+		//copy vertex data to vertex buffer (from CPU to GPU)
+		copyBuffer(stagingBuffer, indexBuffer, size);
+		// destroy temporary buffer
+		vkDestroyBuffer(logicalDevice, stagingBuffer, nullptr);
+		vkFreeMemory(logicalDevice, stagingBufferMemory, nullptr);
+
+	}
 
 	void VulkanInterface::createVertextBuffer()
 	{
@@ -1001,28 +1163,39 @@ namespace vulkanExample
 		}
 	}
 	
+
+	void VulkanInterface::updateUniformBuffer(uint32_t currentImage)
+	{
+		//static variable to save initial time
+		static auto startTime = std::chrono::high_resolution_clock::now();
+		//current time
+		auto currentTime = std::chrono::high_resolution_clock::now();
+		//time difference
+		float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
+
+		UniformBufferObject ubo{};
+		//rotate 90 degrees per second. first parameter is an identity matrix
+		ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+		// Look at 45 degrees angle. Parameters are eye position, center position and up axis
+		ubo.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+		//45 degree vertical field-of-view.The other parameters are the aspect ratio, nearand far view planes.
+		ubo.proj = glm::perspective(glm::radians(45.0f), swapChainExtent.width / (float)swapChainExtent.height, 0.1f, 10.0f);
+
+
+		//GLM was made for OpenGL, therefore it will render upside down in Vulkan. Have to adjust that
+		ubo.proj[1][1] *= -1;
+
+		//copies memory
+		void* data;
+		vkMapMemory(logicalDevice, uniformBuffersMemory[currentImage], 0, sizeof(ubo), 0, &data);
+		memcpy(data, &ubo, sizeof(ubo));
+		vkUnmapMemory(logicalDevice, uniformBuffersMemory[currentImage]);
+
+	}
+
+
 	void VulkanInterface::drawFrame()
 	{
-#ifdef COLOR_PLAYGROUND
-		//does some coloring using cpu... Maybe I can move this to the GPU one day
-		frameCounter++;
-
-		vertices[0].color.r = 1.0- sin(frameCounter * 3.1415 / 180);
-		vertices[0].color.g = sin(frameCounter * 3.1415 / 180);
-		vertices[0].color.b = 1.0;
-
-		vertices[1].color.r = sin(frameCounter * 3.1415 / 180);
-		vertices[1].color.g = 1.0;
-		vertices[1].color.b = 1.0 - sin(frameCounter * 3.1415 / 180);
-
-		vertices[2].color.r = 1.0;
-		vertices[2].color.g = 1.0 - sin(frameCounter * 3.1415 / 180);
-		vertices[2].color.b = sin(frameCounter * 3.1415 / 180);
-		
-		//updates the vertex colors
-		//updateVertexDataToMemory();
-#endif
-
 		vkWaitForFences(logicalDevice, 1, &inFlightFences[currentFrame], VK_TRUE, UINT64_MAX);
 		
 		//acquires image, infinite timeout for now
@@ -1046,6 +1219,8 @@ namespace vulkanExample
 		}
 		// Mark the image as now being in use by this frame
 		imagesInFlight[imageIndex] = inFlightFences[currentFrame];
+
+		updateUniformBuffer(imageIndex);
 
 
 		//prepares command buffer submission (Queue submission and synchronization done by semaphore)
