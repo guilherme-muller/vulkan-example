@@ -466,9 +466,10 @@ namespace vulkanExample
 	
 	std::vector<char> VulkanInterface::readFile(const std::string& filename) 
 	{
+		
 		//opens file, start at the end
 		std::ifstream file(filename, std::ios::ate | std::ios::binary);
-		if (!file.is_open()) {
+		if (!file.is_open() || !file.good()) {
 			throw std::runtime_error("failed to open file!");
 		}
 		//grab file size
