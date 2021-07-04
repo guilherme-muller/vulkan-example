@@ -1,10 +1,12 @@
 #define GLM_FORCE_RADIANS
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
 #define STB_IMAGE_IMPLEMENTATION
+#define TINYOBJLOADER_IMPLEMENTATION
 #include "VulkanInterface.hpp"
 #include "QueueFamilyIndices.hpp"
 #include "glm/glm.hpp"
 #include "glm/gtc/matrix_transform.hpp"
+#include <tiny_obj_loader.h>
 #include "UniformBufferObject.hpp"
 #include <filesystem>
 #include <stb_image.h>
@@ -18,6 +20,7 @@
 #include <algorithm> 
 #include <fstream>
 #include <chrono>
+#include <unordered_map>
 
 
 namespace vulkanExample
@@ -125,6 +128,10 @@ namespace vulkanExample
 
 	void VulkanInterface::cleanupSwapChain()
 	{
+
+		vkDestroyImageView(logicalDevice, colorImageView, nullptr);
+		vkDestroyImage(logicalDevice, colorImage, nullptr);
+		vkFreeMemory(logicalDevice, colorImageMemory, nullptr);
 
 		vkDestroyImageView(logicalDevice, depthImageView, nullptr);
 		vkDestroyImage(logicalDevice, depthImage, nullptr);
@@ -264,6 +271,8 @@ namespace vulkanExample
 		createGraphicsPipeline();
 		//creates command poll
 		createCommandPool();
+		// Enables multisampling
+		createColorResources();
 		//Create Depth Buffer
 		createDepthResources();
 		//creates frame buffer
@@ -274,6 +283,8 @@ namespace vulkanExample
 		createTextureImageView();
 		//creates texture sampler
 		createTextureSampler();
+		// Loads model
+		loadModel({ 0.0f, 0.0f, 0.0f }, modelScale);
 		//Creates Vertex Buffer
 		createVertextBuffer();
 		//creates Index Buffer
@@ -291,11 +302,47 @@ namespace vulkanExample
 	}
 	
 
+	void VulkanInterface::onMouseMove(GLFWwindow* window, double xpos, double ypos)
+	{
+		return;
+		auto instance = reinterpret_cast<VulkanInterface*>(glfwGetWindowUserPointer(window));
+		if (instance != nullptr)
+		{
+			if (instance->firstMouse)
+			{
+				instance->lastX = xpos;
+				instance->lastY = ypos;
+				instance->firstMouse = false;
+			}
+
+			float xoffset = xpos - instance->lastX;
+			float yoffset = instance->lastY - ypos;
+			instance->lastX = xpos;
+			instance->lastY = ypos;
+
+			float sensitivity = 0.1f;
+			xoffset *= sensitivity;
+			yoffset *= sensitivity;
+
+			instance->yaw += xoffset;
+			instance->pitch += yoffset;
+
+			if (instance->pitch > 89.0f)
+				instance->pitch = 89.0f;
+			if (instance->pitch < -89.0f)
+				instance->pitch = -89.0f;
+
+			glm::vec3 direction;
+			direction.x = cos(glm::radians(instance->yaw)) * cos(glm::radians(instance->pitch));
+			direction.y = sin(glm::radians(instance->pitch));
+			direction.z = sin(glm::radians(instance->yaw)) * cos(glm::radians(instance->pitch));
+			instance->cameraFront = glm::normalize(direction);
+
+		}
+	}
+
 	void VulkanInterface::onKeyPress(GLFWwindow* window, int key, int scancode, int action, int mods)
 	{
-		//std::cout << "Key Pressed " << key << " Action " << action << std::endl;
-		// won't handle multiple keys, but that's enough atm
-		// better idea, I guess, is updating this on every draw frame, as long as the keys are 
 		auto instance = reinterpret_cast<VulkanInterface*>(glfwGetWindowUserPointer(window));
 		if (instance != nullptr)
 		{
@@ -337,6 +384,18 @@ namespace vulkanExample
 				if (action == GLFW_RELEASE)
 					instance->pressedKeys -= KeyboardKeys::KEY_DOWN;
 				break;
+			case GLFW_KEY_LEFT:
+				if (action == GLFW_PRESS)
+					instance->pressedKeys += KeyboardKeys::KEY_LEFT;
+				if (action == GLFW_RELEASE)
+					instance->pressedKeys -= KeyboardKeys::KEY_LEFT;
+				break;
+			case GLFW_KEY_RIGHT:
+				if (action == GLFW_PRESS)
+					instance->pressedKeys += KeyboardKeys::KEY_RIGHT;
+				if (action == GLFW_RELEASE)
+					instance->pressedKeys -= KeyboardKeys::KEY_RIGHT;
+				break;
 			default:
 				break;
 			}
@@ -366,10 +425,8 @@ namespace vulkanExample
 		glfwSetWindowUserPointer(window, this);
 		glfwSetWindowSizeCallback(window, framebufferResizeCallback);
 		pressedKeys = KeyboardKeys::KEY_NONE;
-		viewPitch = -1.0f;
-		viewZoom = 1.0f;
-		viewRotation = 0.0f;
 		glfwSetKeyCallback(window, onKeyPress);
+		//glfwSetCursorPosCallback(window, onMouseMove);
 	}
 
 	
@@ -457,6 +514,7 @@ namespace vulkanExample
 		createImageViews();
 		createRenderPass();
 		createGraphicsPipeline();
+		createColorResources();
 		createDepthResources();
 		createFrameBuffers();
 		createUniformBuffers();
@@ -573,7 +631,7 @@ namespace vulkanExample
 		//resize vector
 		swapChainImageViews.resize(swapChainImages.size());
 		for (size_t i = 0; i < swapChainImages.size(); i++) {
-			swapChainImageViews[i] = createImageView(swapChainImages[i], swapChainImageFormat, VK_IMAGE_ASPECT_COLOR_BIT);
+			swapChainImageViews[i] = createImageView(swapChainImages[i], swapChainImageFormat, VK_IMAGE_ASPECT_COLOR_BIT, 1);
 		}
 
 	}
@@ -585,7 +643,7 @@ namespace vulkanExample
 		VkAttachmentDescription colorAttachment{};
 		//image format must match swap chain format
 		colorAttachment.format = swapChainImageFormat;
-		colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+		colorAttachment.samples = msaaSamples;
 
 		//clear color data on load
 		colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
@@ -598,7 +656,7 @@ namespace vulkanExample
 		//we don't care about the inial layout as the image will be cleared
 		colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 		// after rendering, the image is ready to be presented
-		colorAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+		colorAttachment.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
 		//configures color attachment reference for sub-passes
 		VkAttachmentReference colorAttachmentRef{};
@@ -609,7 +667,7 @@ namespace vulkanExample
 
 		VkAttachmentDescription depthAttachment{};
 		depthAttachment.format = findDepthFormat();
-		depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+		depthAttachment.samples = msaaSamples;
 		depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
 		depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
 		depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
@@ -622,6 +680,20 @@ namespace vulkanExample
 		depthAttachmentRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
 
+		VkAttachmentDescription colorAttachmentResolve{};
+		colorAttachmentResolve.format = swapChainImageFormat;
+		colorAttachmentResolve.samples = VK_SAMPLE_COUNT_1_BIT;
+		colorAttachmentResolve.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+		colorAttachmentResolve.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+		colorAttachmentResolve.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+		colorAttachmentResolve.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+		colorAttachmentResolve.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+		colorAttachmentResolve.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
+		VkAttachmentReference colorAttachmentResolveRef{};
+		colorAttachmentResolveRef.attachment = 2;
+		colorAttachmentResolveRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
 		//configures subpass
 		VkSubpassDescription subpass{};
 		subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
@@ -629,9 +701,10 @@ namespace vulkanExample
 		subpass.colorAttachmentCount = 1;
 		subpass.pColorAttachments = &colorAttachmentRef;
 		subpass.pDepthStencilAttachment = &depthAttachmentRef;
+		subpass.pResolveAttachments = &colorAttachmentResolveRef;
 
 
-		std::array<VkAttachmentDescription, 2> attachments = { colorAttachment, depthAttachment };
+		std::array<VkAttachmentDescription, 3> attachments = { colorAttachment, depthAttachment, colorAttachmentResolve };
 
 		//creates render pass info structure and populate data
 		VkRenderPassCreateInfo renderPassInfo{};
@@ -780,7 +853,11 @@ namespace vulkanExample
 		//line width
 		rasterizer.lineWidth = 1.0f;
 		//this is better explained here: https://learnopengl.com/Advanced-OpenGL/Face-culling
+#ifdef BIG_MODEL_LOAD
 		rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
+#else
+		rasterizer.cullMode = VK_CULL_MODE_NONE;
+#endif
 		rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
 		//not using this, could be used for shadow mapping
 		rasterizer.depthBiasEnable = VK_FALSE;
@@ -791,9 +868,9 @@ namespace vulkanExample
 		//for now, we disable multi-sampling
 		VkPipelineMultisampleStateCreateInfo multisampling{};
 		multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-		multisampling.sampleShadingEnable = VK_FALSE;
-		multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-		multisampling.minSampleShading = 1.0f; // Optional
+		multisampling.sampleShadingEnable = VK_TRUE;
+		multisampling.minSampleShading = 0.2f; // Optional
+		multisampling.rasterizationSamples = msaaSamples;
 		multisampling.pSampleMask = nullptr; // Optional
 		multisampling.alphaToCoverageEnable = VK_FALSE; // Optional
 		multisampling.alphaToOneEnable = VK_FALSE; // Optional
@@ -903,9 +980,10 @@ namespace vulkanExample
 
 		//for each swap chain image view, create a framebuffer
 		for (size_t i = 0; i < swapChainImageViews.size(); i++) {
-			std::array<VkImageView, 2> attachments[] = {
-				swapChainImageViews[i],
-				depthImageView
+			std::array<VkImageView, 3> attachments[] = {
+				colorImageView,
+				depthImageView,
+				swapChainImageViews[i]
 			};
 			//populate data
 			VkFramebufferCreateInfo framebufferInfo{};
@@ -1004,7 +1082,7 @@ namespace vulkanExample
 			VkDeviceSize offsets[] = { 0 };
 			vkCmdBindVertexBuffers(commandBuffers[i], 0, 1, vertexBuffers, offsets);
 			
-			vkCmdBindIndexBuffer(commandBuffers[i], indexBuffer, 0, VK_INDEX_TYPE_UINT16);
+			vkCmdBindIndexBuffer(commandBuffers[i], indexBuffer, 0, VK_INDEX_TYPE_UINT32);
 
 			vkCmdBindDescriptorSets(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[i], 0, nullptr);
 
@@ -1183,21 +1261,21 @@ namespace vulkanExample
 
 	}
 
-	void VulkanInterface::createImage(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& imageMemory) {
+	void VulkanInterface::createImage(uint32_t width, uint32_t height, uint32_t mipLevels, VkSampleCountFlagBits numSamples, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& imageMemory) {
 		VkImageCreateInfo imageInfo{};
 		imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
 		imageInfo.imageType = VK_IMAGE_TYPE_2D;
 		imageInfo.extent.width = width;
 		imageInfo.extent.height = height;
 		imageInfo.extent.depth = 1;
-		imageInfo.mipLevels = 1;
 		imageInfo.arrayLayers = 1;
 		imageInfo.format = format;
 		imageInfo.tiling = tiling;
 		imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 		imageInfo.usage = usage;
-		imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+		imageInfo.samples = numSamples;
 		imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+		imageInfo.mipLevels = mipLevels;
 
 		if (vkCreateImage(logicalDevice, &imageInfo, nullptr, &image) != VK_SUCCESS) {
 			throw std::runtime_error("failed to create image!");
@@ -1247,9 +1325,9 @@ namespace vulkanExample
 
 		// Not using mipmaping or Level of Detail
 		samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-		samplerInfo.mipLodBias = 0.0f;
-		samplerInfo.minLod = 0.0f;
-		samplerInfo.maxLod = 0.0f;
+		samplerInfo.minLod = 0.0f; // Optional
+		samplerInfo.maxLod = static_cast<float>(mipLevels);
+		samplerInfo.mipLodBias = 0.0f; // Optional
 		
 		//creates sampler
 		if (vkCreateSampler(logicalDevice, &samplerInfo, nullptr, &textureSampler) != VK_SUCCESS) {
@@ -1260,10 +1338,10 @@ namespace vulkanExample
 
 	void VulkanInterface::createTextureImageView()
 	{
-		textureImageView = createImageView(textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT);
+		textureImageView = createImageView(textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT, mipLevels);
 	}
 
-	VkImageView VulkanInterface::createImageView(VkImage image, VkFormat format, VkImageAspectFlags aspectFlags)
+	VkImageView VulkanInterface::createImageView(VkImage image, VkFormat format, VkImageAspectFlags aspectFlags, uint32_t mipLevels)
 	{
 		VkImageViewCreateInfo viewInfo{};
 		viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
@@ -1272,9 +1350,9 @@ namespace vulkanExample
 		viewInfo.format = format;
 		viewInfo.subresourceRange.aspectMask = aspectFlags;
 		viewInfo.subresourceRange.baseMipLevel = 0;
-		viewInfo.subresourceRange.levelCount = 1;
 		viewInfo.subresourceRange.baseArrayLayer = 0;
 		viewInfo.subresourceRange.layerCount = 1;
+		viewInfo.subresourceRange.levelCount = mipLevels;
 
 		VkImageView imageView;
 		if (vkCreateImageView(logicalDevice, &viewInfo, nullptr, &imageView) != VK_SUCCESS) {
@@ -1283,7 +1361,7 @@ namespace vulkanExample
 		return imageView;
 	}
 
-	void VulkanInterface::transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout)
+	void VulkanInterface::transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout, uint32_t mipLevels)
 	{
 		VkPipelineStageFlags sourceStage;
 		VkPipelineStageFlags destinationStage;
@@ -1300,7 +1378,7 @@ namespace vulkanExample
 		barrier.image = image;
 		barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 		barrier.subresourceRange.baseMipLevel = 0;
-		barrier.subresourceRange.levelCount = 1;
+		barrier.subresourceRange.levelCount = mipLevels;
 		barrier.subresourceRange.baseArrayLayer = 0;
 		barrier.subresourceRange.layerCount = 1;
 
@@ -1390,12 +1468,76 @@ namespace vulkanExample
 		return {};
 	}
 
+	void VulkanInterface::createColorResources()
+	{
+		VkFormat colorFormat = swapChainImageFormat;
+
+		createImage(swapChainExtent.width, swapChainExtent.height, 1, msaaSamples, colorFormat, 
+			VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, colorImage, colorImageMemory);
+		colorImageView = createImageView(colorImage, colorFormat, VK_IMAGE_ASPECT_COLOR_BIT, 1);
+	}
+
+
 	void VulkanInterface::createDepthResources()
 	{
 		VkFormat depthFormat = findDepthFormat();
-		createImage(swapChainExtent.width, swapChainExtent.height, depthFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, depthImage, depthImageMemory);
-		depthImageView = createImageView(depthImage, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT);
-		transitionImageLayout(depthImage, depthFormat, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
+		createImage(swapChainExtent.width, swapChainExtent.height, 1, msaaSamples,
+			depthFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 
+			depthImage, depthImageMemory);
+		depthImageView = createImageView(depthImage, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT, 1);
+		transitionImageLayout(depthImage, depthFormat, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, 1);
+
+	}
+
+	void VulkanInterface::loadModel(glm::vec3 position, glm::vec3 scale)
+	{
+		tinyobj::attrib_t attrib;
+		std::vector<tinyobj::shape_t> shapes;
+		std::vector<tinyobj::material_t> materials;
+		std::string warn, err;
+
+		if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, MODEL_PATH.c_str())) {
+			throw std::runtime_error(warn + err);
+		}
+
+#ifndef NDEBUG
+		if (!err.empty())
+			std::cout << "Errors loading model " << MODEL_PATH.c_str() << std::endl << err << std::endl;
+		if (!warn.empty())
+			std::cout << "Warnings loading model " << MODEL_PATH.c_str() << std::endl << warn << std::endl;
+#endif
+
+		std::unordered_map<Vertex, uint32_t> uniqueVertices{};
+	
+		for (const auto& shape : shapes) {
+			for (const auto& index : shape.mesh.indices) {
+				Vertex vertex{};
+
+
+				vertex.pos = {
+					(attrib.vertices[3 * index.vertex_index + 0] + position.x) * scale.x,
+					(attrib.vertices[3 * index.vertex_index + 1] + position.y) * scale.y,
+					(attrib.vertices[3 * index.vertex_index + 2] + position.z) * scale.z
+				};
+
+				vertex.texCoord = {
+					attrib.texcoords[2 * index.texcoord_index + 0],
+					1.0f - attrib.texcoords[2 * index.texcoord_index + 1]
+				};
+
+				vertex.color = { 1.0f, 1.0f, 1.0f };
+
+				if (uniqueVertices.count(vertex) == 0) {
+					uniqueVertices[vertex] = static_cast<uint32_t>(vertices.size());
+					vertices.push_back(vertex);
+				}
+
+				indices.push_back(uniqueVertices[vertex]);
+			}
+		}
+		
+		std::cout << "Loaded " << vertices.size() << " vertices and " << indices.size() << " indices" << std::endl;
 
 	}
 
@@ -1406,12 +1548,15 @@ namespace vulkanExample
 		VkDeviceMemory stagingBufferMemory;
 		
 		int texWidth, texHeight, texChannels;
-		stbi_uc* pixels = stbi_load("textures/texture4k.jpg", &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+		stbi_uc* pixels = stbi_load(TEXTURE_PATH.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
 		VkDeviceSize imageSize = texWidth * texHeight * 4;
 
 		if (!pixels) {
 			throw std::runtime_error("failed to load texture image!");
 		}
+
+
+		mipLevels = static_cast<uint32_t>(std::floor(std::log2(std::max(texWidth, texHeight)))) + 1;
 
 		createBuffer(imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
 			stagingBuffer, stagingBufferMemory);
@@ -1424,22 +1569,140 @@ namespace vulkanExample
 		//free image
 		stbi_image_free(pixels);
 
-		createImage(texWidth, texHeight, 
+		createImage(texWidth, texHeight, mipLevels, VK_SAMPLE_COUNT_1_BIT,
 			VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_TILING_OPTIMAL, 
-			VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 
+			VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
 			textureImage, textureImageMemory);
 
 		//Transition the texture image to VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
-		transitionImageLayout(textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+		transitionImageLayout(textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, mipLevels);
 		copyBufferToImage(stagingBuffer, textureImage, static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight));
 
 		//prepares for shader
-		transitionImageLayout(textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+		// This is no longer needed, transitioned to VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL while generating mipmaps
+		//transitionImageLayout(textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, mipLevels);
+
+		generateMipmaps(textureImage, VK_FORMAT_R8G8B8A8_SRGB, texWidth, texHeight, mipLevels);
 
 		vkDestroyBuffer(logicalDevice, stagingBuffer, nullptr);
 		vkFreeMemory(logicalDevice, stagingBufferMemory, nullptr);
 
 	}
+
+
+	VkSampleCountFlagBits VulkanInterface::getMaxUsableSampleCount()
+	{
+#ifndef FORCE_MAX_MSAA
+		return VK_SAMPLE_COUNT_2_BIT;
+#else
+		VkPhysicalDeviceProperties physicalDeviceProperties;
+		vkGetPhysicalDeviceProperties(physicalDevice, &physicalDeviceProperties);
+
+		VkSampleCountFlags counts = physicalDeviceProperties.limits.framebufferColorSampleCounts & 
+			physicalDeviceProperties.limits.framebufferDepthSampleCounts;
+		if (counts & VK_SAMPLE_COUNT_64_BIT) { return VK_SAMPLE_COUNT_64_BIT; }
+		if (counts & VK_SAMPLE_COUNT_32_BIT) { return VK_SAMPLE_COUNT_32_BIT; }
+		if (counts & VK_SAMPLE_COUNT_16_BIT) { return VK_SAMPLE_COUNT_16_BIT; }
+		if (counts & VK_SAMPLE_COUNT_8_BIT) { return VK_SAMPLE_COUNT_8_BIT; }
+		if (counts & VK_SAMPLE_COUNT_4_BIT) { return VK_SAMPLE_COUNT_4_BIT; }
+		if (counts & VK_SAMPLE_COUNT_2_BIT) { return VK_SAMPLE_COUNT_2_BIT; }
+
+		return VK_SAMPLE_COUNT_1_BIT;
+#endif
+	}
+
+	void VulkanInterface::generateMipmaps(VkImage image, VkFormat format, int32_t texWidth, int32_t texHeight, uint32_t mipLevels) {
+		
+		// Check if image format supports linear blitting
+		VkFormatProperties formatProperties;
+		vkGetPhysicalDeviceFormatProperties(physicalDevice, format, &formatProperties);
+		
+		if (!(formatProperties.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT)) {
+			throw std::runtime_error("texture image format does not support linear blitting!");
+		}
+
+
+		VkCommandBuffer commandBuffer = beginSingleTimeCommands();
+
+		VkImageMemoryBarrier barrier{};
+		barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+		barrier.image = image;
+		barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		barrier.subresourceRange.baseArrayLayer = 0;
+		barrier.subresourceRange.layerCount = 1;
+		barrier.subresourceRange.levelCount = 1;
+
+		int32_t mipWidth = texWidth;
+		int32_t mipHeight = texHeight;
+
+		for (uint32_t i = 1; i < mipLevels; i++) {
+			barrier.subresourceRange.baseMipLevel = i - 1;
+			barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+			barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+			barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+			barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+
+			vkCmdPipelineBarrier(commandBuffer,
+				VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0,
+				0, nullptr,
+				0, nullptr,
+				1, &barrier);
+
+			VkImageBlit blit{};
+			blit.srcOffsets[0] = { 0, 0, 0 };
+			blit.srcOffsets[1] = { mipWidth, mipHeight, 1 };
+			blit.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+			blit.srcSubresource.mipLevel = i - 1;
+			blit.srcSubresource.baseArrayLayer = 0;
+			blit.srcSubresource.layerCount = 1;
+			blit.dstOffsets[0] = { 0, 0, 0 };
+			blit.dstOffsets[1] = { mipWidth > 1 ? mipWidth / 2 : 1, mipHeight > 1 ? mipHeight / 2 : 1, 1 };
+			blit.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+			blit.dstSubresource.mipLevel = i;
+			blit.dstSubresource.baseArrayLayer = 0;
+			blit.dstSubresource.layerCount = 1;
+
+
+			vkCmdBlitImage(commandBuffer,
+				image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+				image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+				1, &blit,
+				VK_FILTER_LINEAR);
+
+			barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+			barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+			barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+			barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+			vkCmdPipelineBarrier(commandBuffer,
+				VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0,
+				0, nullptr,
+				0, nullptr,
+				1, &barrier);
+
+			if (mipWidth > 1) mipWidth /= 2;
+			if (mipHeight > 1) mipHeight /= 2;
+		}
+
+		barrier.subresourceRange.baseMipLevel = mipLevels - 1;
+		barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+		barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+		barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+		barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+		vkCmdPipelineBarrier(commandBuffer,
+			VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0,
+			0, nullptr,
+			0, nullptr,
+			1, &barrier);
+
+
+
+		endSingleTimeCommands(commandBuffer);
+	}
+
 
 	void VulkanInterface::createVertextBuffer()
 	{
@@ -1594,21 +1857,39 @@ namespace vulkanExample
 	{
 		
 		if (pressedKeys & vulkanExample::KeyboardKeys::KEY_W)
-			if (viewZoom >= maxZoom)
-				viewZoom -= zoomFactor;
+			cameraPos += cameraSpeed * cameraFront;
 		if (pressedKeys & vulkanExample::KeyboardKeys::KEY_S)
-			if (viewZoom <= minZoom)
-				viewZoom += zoomFactor;
+			cameraPos -= cameraSpeed * cameraFront;
 		if (pressedKeys & vulkanExample::KeyboardKeys::KEY_A)
-			viewRotation += rotationFactor;
+			cameraPos -= glm::normalize(glm::cross(cameraFront, cameraUp)) * cameraSpeed;
 		if (pressedKeys & vulkanExample::KeyboardKeys::KEY_D)
-			viewRotation -= rotationFactor;
+			cameraPos += glm::normalize(glm::cross(cameraFront, cameraUp)) * cameraSpeed;
 		if (pressedKeys & vulkanExample::KeyboardKeys::KEY_UP)
-			if (viewPitch >= maxPitch)
-				viewPitch -= pitchFactor;
+		{
+			cameraFront.x -= pitchStep;
+			cameraFront.y -= pitchStep;
+		}
 		if (pressedKeys & vulkanExample::KeyboardKeys::KEY_DOWN)
-			if (viewPitch <= minPitch)
-				viewPitch += pitchFactor;
+		{
+			cameraFront.x += pitchStep;
+			cameraFront.y += pitchStep;
+		}
+		if (pressedKeys & vulkanExample::KeyboardKeys::KEY_LEFT)
+		{
+			/*cameraFront.y += glm::cos(glm::radians(pitchStep)) / 10.0f;
+			cameraFront.x += glm::sin(glm::radians(pitchStep)) / 10.0f;
+			cameraFront.z += (glm::sin(glm::radians(pitchStep)) * glm::cos(glm::radians(pitchStep))) / 10.0f;*/
+			//rotates the model instead of the camera. Should work for now.
+			rotation -= 0.1f;
+		}
+		if (pressedKeys & vulkanExample::KeyboardKeys::KEY_RIGHT)
+		{
+			/*cameraFront.y -= glm::cos(glm::radians(pitchStep)) / 10.0f;
+			cameraFront.x -= glm::sin(glm::radians(pitchStep))/10.0f;
+			cameraFront.z -= (glm::sin(glm::radians(pitchStep)) * glm::cos(glm::radians(pitchStep))) / 10.0f;*/
+			//rotates the model instead of the camera. Should work for now.
+			rotation += 0.1f;
+		}
 	}
 	
 
@@ -1625,15 +1906,21 @@ namespace vulkanExample
 
 		UniformBufferObject ubo{};
 		//rotate 90 degrees per second. first parameter is an identity matrix
-		ubo.model = glm::rotate(glm::mat4(1.0f), viewRotation * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+		
+		
+		ubo.model = glm::rotate(glm::mat4(1.0f), rotation * glm::radians(15.0f), glm::vec3(0.0f, 0.0f, 1.0f));
 		// Look at 45 degrees angle. Parameters are eye position, center position and up axis
-		ubo.view = glm::lookAt(glm::vec3(viewZoom, viewZoom, viewZoom), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+		//ubo.view = glm::lookAt(glm::vec3(viewZoom, 0.0f, viewPitch), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+		
+
+		ubo.view = glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
+
 		//45 degree vertical field-of-view.The other parameters are the aspect ratio, nearand far view planes.
-		ubo.proj = glm::perspective(glm::radians(45.0f), swapChainExtent.width / (float)swapChainExtent.height, 0.1f, 10.0f);
+		ubo.proj = glm::perspective(glm::radians(30.0f), swapChainExtent.width / (float)swapChainExtent.height, 0.1f, 10.0f);
 
 
 		//GLM was made for OpenGL, therefore it will render upside down in Vulkan. Have to adjust that
-		ubo.proj[1][1] *= viewPitch;
+		ubo.proj[1][1] *= -1.0f;
 
 		//copies memory
 		void* data;
@@ -1800,6 +2087,7 @@ namespace vulkanExample
 			if (result.has_value())
 			{
 				physicalDevice = device;
+				msaaSamples = getMaxUsableSampleCount();
 				queueFamilies = result.value();
 				vkGetPhysicalDeviceProperties(device, &deviceProperties);
 				vkGetPhysicalDeviceFeatures(device, &deviceFeatures);
@@ -2047,6 +2335,7 @@ namespace vulkanExample
 
 		// enables anisotropy filter
 		deviceFeatures.samplerAnisotropy = VK_TRUE;
+		deviceFeatures.sampleRateShading = VK_TRUE;
 		//Adds extensions
 		deviceCreateInfo.enabledExtensionCount = static_cast<uint32_t>(deviceExtensions.size());
 		deviceCreateInfo.ppEnabledExtensionNames = deviceExtensions.data();

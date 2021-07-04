@@ -18,7 +18,9 @@ namespace vulkanExample
 		KEY_A = 1 << 3,
 		KEY_D = 1 << 4,
 		KEY_UP = 1 << 5,
-		KEY_DOWN = 1 << 6
+		KEY_DOWN = 1 << 6,
+		KEY_LEFT = 1 << 7,
+		KEY_RIGHT = 1 << 8
 	};
 
 	inline void operator+=(KeyboardKeys &a, KeyboardKeys b)
@@ -82,23 +84,20 @@ namespace vulkanExample
 		
 
 	private:
+//#define FORCE_MAX_MSAA
 
-		std::vector<Vertex> vertices = {
-			{{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f}},
-			{{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}},
-			{{0.5f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}},
-			{{-0.5f, 0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}},
+#ifdef BIG_MODEL_LOAD
+		const std::string MODEL_PATH = "models/estances_lq.obj";
+		const std::string TEXTURE_PATH = "textures/estances_lq_u1_v1.jpg";
+		const glm::vec3 modelScale = { 0.1f, 0.1f, 0.1f };
+#else
+		const std::string MODEL_PATH = "models/viking_room.obj";
+		const std::string TEXTURE_PATH = "textures/viking_room.png";
+		const glm::vec3 modelScale = { 1.0f, 1.0f, 1.0f };
+#endif
 
-			{{-0.5f, -0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
-			{{0.5f, -0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}},
-			{{0.5f, 0.5f, -0.5f}, {0.0f, 0.0f, 1.0f}, {1.0f, 1.0f}},
-			{{-0.5f, 0.5f, -0.5f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}}
-		};
-
-		std::vector<uint16_t> indices = {
-			0,1,2,2,3,0,
-			4,5,6,6,7,4
-		};
+		std::vector<Vertex> vertices;
+		std::vector<uint32_t> indices;
 
 		
 
@@ -106,20 +105,16 @@ namespace vulkanExample
 		KeyboardKeys pressedKeys;
 		
 
-		float viewPitch;
-		const float minPitch = -0.1f;
-		const float maxPitch = -2.0f;
-		const float pitchFactor = 0.01f;
-
-		float viewRotation;
-		const float rotationFactor = 0.03f;
-		
-		float viewZoom;
-		const float zoomFactor = 0.015f;
-		//They are inverted, yes
-		const float maxZoom = 0.2f;
-		const float minZoom = 3.0f;
-
+		float lastX = 400, lastY = 300;
+		bool firstMouse = false;
+		float pitchStep = 0.03f;
+		float yaw = -90.0f;
+		float pitch = 30.0f;
+		float rotation = 1.0f;
+		const float cameraSpeed = 0.015f;
+		glm::vec3 cameraPos = glm::vec3(2.0f, 2.0f, 2.0f);
+		glm::vec3 cameraFront = glm::vec3(-2.0f, -2.0f, -2.0f);
+		glm::vec3 cameraUp = glm::vec3(0.0f, 0.0f, 1.0f);
 
 
 		uint64_t frameCounter = 0;
@@ -173,6 +168,9 @@ namespace vulkanExample
 		VkPhysicalDeviceProperties deviceProperties;
 		VkPhysicalDeviceFeatures deviceFeatures;
 		QueueFamilyIndices queueFamilies;
+		uint32_t mipLevels;
+		VkSampleCountFlagBits msaaSamples = VK_SAMPLE_COUNT_1_BIT;
+
 		VkImage textureImage;
 		VkImageView textureImageView;
 		VkSampler textureSampler;
@@ -182,6 +180,10 @@ namespace vulkanExample
 		VkDeviceMemory depthImageMemory;
 		VkImageView depthImageView;
 
+		VkImage colorImage;
+		VkDeviceMemory colorImageMemory;
+		VkImageView colorImageView;
+
 		uint32_t w_width;
 		uint32_t w_height;
 
@@ -189,6 +191,7 @@ namespace vulkanExample
 		void initWindow(const uint32_t width, const uint32_t height);
 		static void framebufferResizeCallback(GLFWwindow* window, int width, int height);
 		static void onKeyPress(GLFWwindow* window, int key, int scancode, int action, int mods);
+		static void onMouseMove(GLFWwindow* window, double xpos, double ypos);
 		void initVulkan();
 		void createSurface();
 		bool checkValidationLayerSupport();
@@ -210,6 +213,7 @@ namespace vulkanExample
 		void createFrameBuffers();
 		void createCommandPool();
 		void createCommandBuffers();
+		void createColorResources();
 		void createDepthResources();
 		void createTextureImage();
 		void createVertextBuffer();
@@ -226,13 +230,14 @@ namespace vulkanExample
 		void updateUniformBuffer(uint32_t currentImage);
 		void updateViewPosition();
 		void drawFrame();
-		
-		void createImage(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage,
+		VkSampleCountFlagBits getMaxUsableSampleCount();
+		void generateMipmaps(VkImage image, VkFormat format, int32_t texWidth, int32_t texHeight, uint32_t mipLevels);
+		void createImage(uint32_t width, uint32_t height, uint32_t mipLevels, VkSampleCountFlagBits numSamples, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage,
 			VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& imageMemory);
 		void createTextureImageView();
 		void createTextureSampler();
-		VkImageView createImageView(VkImage image, VkFormat format, VkImageAspectFlags aspectFlags);
-		void transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout);
+		VkImageView createImageView(VkImage image, VkFormat format, VkImageAspectFlags aspectFlags, uint32_t mipLevels);
+		void transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout, uint32_t mipLevels);
 		uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties);
 		bool checkDeviceExtensionSupport(VkPhysicalDevice device);
 		void printDeviceExtensionSupport(VkPhysicalDevice device);
@@ -247,6 +252,7 @@ namespace vulkanExample
 		VkFormat findDepthFormat();
 		bool hasStencilComponent(VkFormat format);
 
+		void loadModel(glm::vec3 position, glm::vec3 scale);
 		static std::vector<char> readFile(const std::string& filename);
 	};
 
