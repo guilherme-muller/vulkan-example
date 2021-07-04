@@ -5,7 +5,7 @@
 namespace vulkanExample
 {
     struct Vertex {
-        glm::vec2 pos;
+        glm::vec3 pos;
         glm::vec3 color;
         glm::vec2 texCoord;
 
@@ -24,8 +24,8 @@ namespace vulkanExample
             //position attribute
             attributeDescriptions[0].binding = 0;
             attributeDescriptions[0].location = 0;
-            //Matches vec2
-            attributeDescriptions[0].format = VK_FORMAT_R32G32_SFLOAT;
+            //Matches vec3
+            attributeDescriptions[0].format = VK_FORMAT_R32G32B32_SFLOAT;
             //offset to  position
             attributeDescriptions[0].offset = offsetof(Vertex, pos);
 
